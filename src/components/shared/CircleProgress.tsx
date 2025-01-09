@@ -83,7 +83,7 @@ const GoalsTracker = () => {
             key={goal.id}
             className="bg-gray-700/50 p-4 rounded-lg space-y-4 flex flex-col transition-all duration-300"
           >
-            {/* Изображение */}
+
             <div className="mb-4 relative">
               <input
                 type="file"
@@ -108,13 +108,13 @@ const GoalsTracker = () => {
                   </div>
                 )}
               </label>
-              {/* Круговой прогресс */}
+
               <div className="absolute bottom-4 right-4 bg-gray-800/80 rounded-full p-1">
                 <CircleProgress percentage={calculateProgress(goal)} />
               </div>
             </div>
 
-            {/* Заголовок */}
+
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
               <input
                 type="text"
@@ -201,7 +201,7 @@ const GoalsTracker = () => {
               </div>
             </div>
 
-            {/* Notes */}
+      
             <div className="flex-1 flex flex-col">
               <input
                 type="text"
