@@ -42,18 +42,18 @@ interface SortOption {
 }
 
 const priorityCriteria: PriorityCriterion[] = [
-  { id: 'importance', name: 'Важность', weight: 0.4 },
-  { id: 'urgency', name: 'Срочность', weight: 0.3 },
-  { id: 'effort', name: 'Сложность', weight: 0.2 },
-  { id: 'impact', name: 'Влияние', weight: 0.1 }
+  { id: 'importance', name: 'Importance', weight: 0.4 },
+  { id: 'urgency', name: 'Urgency', weight: 0.3 },
+  { id: 'effort', name: 'Complexity', weight: 0.2 },
+  { id: 'impact', name: 'Impact', weight: 0.1 }
 ];
 
 const sortOptions: SortOption[] = [
-  { value: 'default', label: 'По умолчанию' },
-  { value: 'priority-high', label: 'Приоритет (высокий-низкий)' },
-  { value: 'priority-low', label: 'Приоритет (низкий-высокий)' },
-  { value: 'deadline', label: 'По сроку' },
-  { value: 'name', label: 'По названию' }
+  { value: 'default', label: 'default' },
+  { value: 'priority-high', label: 'priority-high' },
+  { value: 'priority-low', label: 'priority-low' },
+  { value: 'deadline', label: 'deadline' },
+  { value: 'name', label: 'name' }
 ];
 
 interface PriorityRatingProps {
