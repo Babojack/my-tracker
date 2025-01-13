@@ -66,9 +66,9 @@ const ProjectTracker: React.FC = () => {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
       <div className="flex justify-between items-center mb-6">
-        <h2 className="text-2xl font-bold">Projects</h2>
+        <h2 className="text-xl sm:text-2xl font-bold">Projects</h2>
         <button
           onClick={() => setProjects([...projects, {
             id: Date.now(),
@@ -80,16 +80,14 @@ const ProjectTracker: React.FC = () => {
           }])}
           className="p-2 bg-blue-500 rounded-lg hover:bg-blue-600 transition-colors"
         >
-          <Plus className="w-5 h-5" />
+          <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
         </button>
       </div>
 
-      {/* Grid контейнер для карточек */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
         {projects.map(project => (
-          <div key={project.id} className="bg-gray-700/50 p-4 rounded-lg space-y-4 flex flex-col">
-            {/* Изображение проекта */}
-            <div className="mb-4">
+          <div key={project.id} className="bg-gray-700/50 p-3 sm:p-4 rounded-lg flex flex-col">
+            <div className="relative mb-3 sm:mb-4">
               <input
                 type="file"
                 accept="image/*"
@@ -105,28 +103,27 @@ const ProjectTracker: React.FC = () => {
                   <img
                     src={project.image}
                     alt="Project"
-                    className="w-full h-32 object-cover rounded"
+                    className="w-full h-24 sm:h-32 object-cover rounded"
                   />
                 ) : (
-                  <div className="w-full h-32 bg-gray-800 rounded flex items-center justify-center">
-                    <Plus className="w-6 h-6 text-gray-400" />
+                  <div className="w-full h-24 sm:h-32 bg-gray-800 rounded flex items-center justify-center">
+                    <Plus className="w-5 h-5 sm:w-6 sm:h-6 text-gray-400" />
                   </div>
                 )}
               </label>
             </div>
 
-            {/* Заголовок проекта и статус */}
-            <div className="flex justify-between items-center">
+            <div className="flex justify-between items-center mb-3">
               <input
                 type="text"
                 value={project.name}
                 onChange={(e) => setProjects(projects.map(p =>
                   p.id === project.id ? {...p, name: e.target.value} : p
                 ))}
-                className="bg-transparent font-semibold outline-none"
+                className="bg-transparent font-semibold text-sm sm:text-base outline-none max-w-[60%]"
               />
               <div className="flex items-center space-x-2">
-                <span className="text-sm px-2 py-1 rounded bg-gray-800">{project.status}</span>
+                <span className="text-xs sm:text-sm px-2 py-1 rounded bg-gray-800 whitespace-nowrap">{project.status}</span>
                 <button
                   onClick={() => setProjects(projects.filter(p => p.id !== project.id))}
                   className="p-1 hover:bg-gray-600 rounded"
@@ -136,10 +133,9 @@ const ProjectTracker: React.FC = () => {
               </div>
             </div>
 
-            {/* Milestones секция */}
-            <div className="space-y-2">
+            <div className="space-y-2 mb-3">
               <div className="flex justify-between items-center">
-                <h3 className="text-sm font-semibold">Milestones</h3>
+                <h3 className="text-xs sm:text-sm font-semibold">Milestones</h3>
                 <button
                   onClick={() => setProjects(projects.map(p =>
                     p.id === project.id ? {
@@ -153,11 +149,10 @@ const ProjectTracker: React.FC = () => {
                   ))}
                   className="p-1 hover:bg-gray-600 rounded"
                 >
-                  <Plus className="w-4 h-4" />
+                  <Plus className="w-3 h-3 sm:w-4 sm:h-4" />
                 </button>
               </div>
-              {/* Скроллируемый контейнер для milestones */}
-              <div className="max-h-32 overflow-y-auto space-y-2 pr-2">
+              <div className="max-h-28 sm:max-h-32 overflow-y-auto space-y-2 pr-2 scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-transparent">
                 {project.milestones.map(milestone => (
                   <Milestone
                     key={milestone.id}
@@ -193,12 +188,11 @@ const ProjectTracker: React.FC = () => {
               </div>
             </div>
 
-            {/* Notes секция */}
-            <div className="flex-1 flex flex-col">
+            <div className="flex-1 flex flex-col min-h-[120px]">
               <input
                 type="text"
                 placeholder="Add a note and press Enter..."
-                className="w-full bg-gray-800 rounded p-2"
+                className="w-full bg-gray-800 rounded p-2 text-sm"
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && (e.target as HTMLInputElement).value.trim()) {
                     addNote(project.id, (e.target as HTMLInputElement).value.trim());
@@ -206,8 +200,7 @@ const ProjectTracker: React.FC = () => {
                   }
                 }}
               />
-              {/* Скроллируемый контейнер для заметок */}
-              <div className="flex-1 max-h-32 overflow-y-auto space-y-2 mt-2 pr-2">
+              <div className="flex-1 max-h-28 sm:max-h-32 overflow-y-auto space-y-2 mt-2 pr-2 scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-transparent">
                 {project.notes.map(note => (
                   <Note
                     key={note.id}
