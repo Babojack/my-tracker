@@ -1,62 +1,229 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Plus, X } from 'lucide-react';
 import Note from '../shared/Note';
 import Milestone from '../shared/Milestone';
+import { db, storage } from '../../firebase';
+import {
+  collection,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  doc,
+  query,
+  orderBy,
+  onSnapshot,
+  Timestamp
+} from 'firebase/firestore';
+import {
+  ref,
+  uploadBytes,
+  getDownloadURL,
+  deleteObject
+} from 'firebase/storage';
 
 interface Project {
-  id: number;
+  id: string;
   name: string;
   status: string;
-  image: string | null;
+  imageUrl: string | null;
   milestones: {
-    id: number;
+    id: string;
     name: string;
     completed: boolean;
   }[];
   notes: {
-    id: number;
+    id: string;
     text: string;
-    timestamp: string;
+    timestamp: Timestamp;
   }[];
 }
 
 const ProjectTracker: React.FC = () => {
-  const [projects, setProjects] = useState<Project[]>([{
-    id: 1,
-    name: 'Project 1',
-    status: 'Not Started',
-    image: null,
-    milestones: [
-      { id: 1, name: 'Research', completed: false },
-      { id: 2, name: 'Development', completed: false }
-    ],
-    notes: []
-  }]);
+  const [projects, setProjects] = useState<Project[]>([]);
 
-  const handleImageUpload = (projectId: number, event: React.ChangeEvent<HTMLInputElement>) => {
+  // Подписка на обновления из Firestore
+  useEffect(() => {
+    const q = query(collection(db, 'projects'), orderBy('timestamp', 'desc'));
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const projectsData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Project[];
+      setProjects(projectsData);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const handleImageUpload = async (projectId: string, event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setProjects(projects.map(p =>
-          p.id === projectId ? {...p, image: reader.result as string} : p
-        ));
-      };
-      reader.readAsDataURL(file);
+    if (!file) return;
+
+    try {
+      // Создаем reference для изображения в Storage
+      const imageRef = ref(storage, `project-images/${projectId}/${file.name}`);
+
+      // Загружаем файл
+      await uploadBytes(imageRef, file);
+
+      // Получаем URL загруженного файла
+      const downloadUrl = await getDownloadURL(imageRef);
+
+      // Обновляем документ в Firestore
+      const projectRef = doc(db, 'projects', projectId);
+      await updateDoc(projectRef, {
+        imageUrl: downloadUrl
+      });
+    } catch (error) {
+      console.error('Error uploading image:', error);
     }
   };
 
-  const addNote = (projectId: number, note: string) => {
-    setProjects(projects.map(p =>
-      p.id === projectId ? {
-        ...p,
-        notes: [{
-          id: Date.now(),
-          text: note,
-          timestamp: new Date().toISOString()
-        }, ...p.notes]
-      } : p
-    ));
+  const addNewProject = async () => {
+    try {
+      await addDoc(collection(db, 'projects'), {
+        name: 'New Project',
+        status: 'Not Started',
+        imageUrl: null,
+        milestones: [],
+        notes: [],
+        timestamp: Timestamp.now()
+      });
+    } catch (error) {
+      console.error('Error adding project:', error);
+    }
+  };
+
+  const updateProjectName = async (projectId: string, newName: string) => {
+    try {
+      const projectRef = doc(db, 'projects', projectId);
+      await updateDoc(projectRef, { name: newName });
+    } catch (error) {
+      console.error('Error updating project name:', error);
+    }
+  };
+
+  const deleteProject = async (projectId: string) => {
+    try {
+      await deleteDoc(doc(db, 'projects', projectId));
+      // Также удаляем изображение из Storage, если оно есть
+      const project = projects.find(p => p.id === projectId);
+      if (project?.imageUrl) {
+        const imageRef = ref(storage, project.imageUrl);
+        await deleteObject(imageRef);
+      }
+    } catch (error) {
+      console.error('Error deleting project:', error);
+    }
+  };
+
+  const addMilestone = async (projectId: string) => {
+    try {
+      const project = projects.find(p => p.id === projectId);
+      if (!project) return;
+
+      const newMilestone = {
+        id: Date.now().toString(),
+        name: 'New Milestone',
+        completed: false
+      };
+
+      const projectRef = doc(db, 'projects', projectId);
+      await updateDoc(projectRef, {
+        milestones: [...project.milestones, newMilestone]
+      });
+    } catch (error) {
+      console.error('Error adding milestone:', error);
+    }
+  };
+
+  const updateMilestone = async (projectId: string, milestoneId: string, newName: string) => {
+    try {
+      const project = projects.find(p => p.id === projectId);
+      if (!project) return;
+
+      const updatedMilestones = project.milestones.map(m =>
+        m.id === milestoneId ? { ...m, name: newName } : m
+      );
+
+      const projectRef = doc(db, 'projects', projectId);
+      await updateDoc(projectRef, { milestones: updatedMilestones });
+    } catch (error) {
+      console.error('Error updating milestone:', error);
+    }
+  };
+
+  const toggleMilestone = async (projectId: string, milestoneId: string) => {
+    try {
+      const project = projects.find(p => p.id === projectId);
+      if (!project) return;
+
+      const updatedMilestones = project.milestones.map(m =>
+        m.id === milestoneId ? { ...m, completed: !m.completed } : m
+      );
+
+      const updatedStatus = updateProjectStatus({
+        ...project,
+        milestones: updatedMilestones
+      });
+
+      const projectRef = doc(db, 'projects', projectId);
+      await updateDoc(projectRef, {
+        milestones: updatedMilestones,
+        status: updatedStatus
+      });
+    } catch (error) {
+      console.error('Error toggling milestone:', error);
+    }
+  };
+
+  const deleteMilestone = async (projectId: string, milestoneId: string) => {
+    try {
+      const project = projects.find(p => p.id === projectId);
+      if (!project) return;
+
+      const updatedMilestones = project.milestones.filter(m => m.id !== milestoneId);
+
+      const projectRef = doc(db, 'projects', projectId);
+      await updateDoc(projectRef, { milestones: updatedMilestones });
+    } catch (error) {
+      console.error('Error deleting milestone:', error);
+    }
+  };
+
+  const addNote = async (projectId: string, noteText: string) => {
+    try {
+      const project = projects.find(p => p.id === projectId);
+      if (!project) return;
+
+      const newNote = {
+        id: Date.now().toString(),
+        text: noteText,
+        timestamp: Timestamp.now()
+      };
+
+      const projectRef = doc(db, 'projects', projectId);
+      await updateDoc(projectRef, {
+        notes: [newNote, ...project.notes]
+      });
+    } catch (error) {
+      console.error('Error adding note:', error);
+    }
+  };
+
+  const deleteNote = async (projectId: string, noteId: string) => {
+    try {
+      const project = projects.find(p => p.id === projectId);
+      if (!project) return;
+
+      const updatedNotes = project.notes.filter(n => n.id !== noteId);
+
+      const projectRef = doc(db, 'projects', projectId);
+      await updateDoc(projectRef, { notes: updatedNotes });
+    } catch (error) {
+      console.error('Error deleting note:', error);
+    }
   };
 
   const updateProjectStatus = (project: Project) => {
@@ -70,14 +237,7 @@ const ProjectTracker: React.FC = () => {
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-xl sm:text-2xl font-bold">Projects</h2>
         <button
-          onClick={() => setProjects([...projects, {
-            id: Date.now(),
-            name: 'New Project',
-            status: 'Not Started',
-            image: null,
-            milestones: [],
-            notes: []
-          }])}
+          onClick={addNewProject}
           className="p-2 bg-blue-500 rounded-lg hover:bg-blue-600 transition-colors"
         >
           <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -99,9 +259,9 @@ const ProjectTracker: React.FC = () => {
                 htmlFor={`project-${project.id}`}
                 className="cursor-pointer block"
               >
-                {project.image ? (
+                {project.imageUrl ? (
                   <img
-                    src={project.image}
+                    src={project.imageUrl}
                     alt="Project"
                     className="w-full h-24 sm:h-32 object-cover rounded"
                   />
@@ -117,15 +277,15 @@ const ProjectTracker: React.FC = () => {
               <input
                 type="text"
                 value={project.name}
-                onChange={(e) => setProjects(projects.map(p =>
-                  p.id === project.id ? {...p, name: e.target.value} : p
-                ))}
+                onChange={(e) => updateProjectName(project.id, e.target.value)}
                 className="bg-transparent font-semibold text-sm sm:text-base outline-none max-w-[60%]"
               />
               <div className="flex items-center space-x-2">
-                <span className="text-xs sm:text-sm px-2 py-1 rounded bg-gray-800 whitespace-nowrap">{project.status}</span>
+                <span className="text-xs sm:text-sm px-2 py-1 rounded bg-gray-800 whitespace-nowrap">
+                  {project.status}
+                </span>
                 <button
-                  onClick={() => setProjects(projects.filter(p => p.id !== project.id))}
+                  onClick={() => deleteProject(project.id)}
                   className="p-1 hover:bg-gray-600 rounded"
                 >
                   <X className="w-4 h-4" />
@@ -137,16 +297,7 @@ const ProjectTracker: React.FC = () => {
               <div className="flex justify-between items-center">
                 <h3 className="text-xs sm:text-sm font-semibold">Milestones</h3>
                 <button
-                  onClick={() => setProjects(projects.map(p =>
-                    p.id === project.id ? {
-                      ...p,
-                      milestones: [...p.milestones, {
-                        id: Date.now(),
-                        name: 'New Milestone',
-                        completed: false
-                      }]
-                    } : p
-                  ))}
+                  onClick={() => addMilestone(project.id)}
                   className="p-1 hover:bg-gray-600 rounded"
                 >
                   <Plus className="w-3 h-3 sm:w-4 sm:h-4" />
@@ -157,32 +308,9 @@ const ProjectTracker: React.FC = () => {
                   <Milestone
                     key={milestone.id}
                     milestone={milestone}
-                    onToggle={() => {
-                      const updatedProject = {
-                        ...project,
-                        milestones: project.milestones.map(m =>
-                          m.id === milestone.id ? {...m, completed: !m.completed} : m
-                        )
-                      };
-                      updatedProject.status = updateProjectStatus(updatedProject);
-                      setProjects(projects.map(p =>
-                        p.id === project.id ? updatedProject : p
-                      ));
-                    }}
-                    onUpdate={(name) => setProjects(projects.map(p => ({
-                      ...p,
-                      milestones: p.id === project.id
-                        ? p.milestones.map(m =>
-                            m.id === milestone.id ? {...m, name} : m
-                          )
-                        : p.milestones
-                    })))}
-                    onDelete={() => setProjects(projects.map(p => ({
-                      ...p,
-                      milestones: p.id === project.id
-                        ? p.milestones.filter(m => m.id !== milestone.id)
-                        : p.milestones
-                    })))}
+                    onToggle={() => toggleMilestone(project.id, milestone.id)}
+                    onUpdate={(name) => updateMilestone(project.id, milestone.id, name)}
+                    onDelete={() => deleteMilestone(project.id, milestone.id)}
                   />
                 ))}
               </div>
@@ -204,13 +332,11 @@ const ProjectTracker: React.FC = () => {
                 {project.notes.map(note => (
                   <Note
                     key={note.id}
-                    note={note}
-                    onDelete={() => setProjects(projects.map(p => ({
-                      ...p,
-                      notes: p.id === project.id
-                        ? p.notes.filter(n => n.id !== note.id)
-                        : p.notes
-                    })))}
+                    note={{
+                      ...note,
+                      timestamp: note.timestamp.toDate().toISOString()
+                    }}
+                    onDelete={() => deleteNote(project.id, note.id)}
                   />
                 ))}
               </div>

@@ -1,134 +1,170 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Plus, X } from 'lucide-react';
-import Note from '../shared/Note';
+import { db } from '../../firebase';
+import {
+  collection,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  doc,
+  query,
+  orderBy,
+  onSnapshot,
+  Timestamp,
+  arrayUnion,
+  arrayRemove
+} from 'firebase/firestore';
 
+// Обновленные интерфейсы для Firestore
 interface TodoNote {
-  id: number;
+  id: string;
   text: string;
-  timestamp: string;
+  timestamp: Timestamp;
 }
 
 interface Todo {
-  id: number;
+  id: string;
   text: string;
   completed: boolean;
   notes: TodoNote[];
 }
 
 interface TodoGroup {
-  id: number;
+  id: string;
   title: string;
+  timestamp: Timestamp;
   todos: Todo[];
 }
 
 const TodoTracker: React.FC = () => {
-  const [todoGroups, setTodoGroups] = useState<TodoGroup[]>([
-    {
-      id: Date.now(),
-      title: new Date().toLocaleDateString('en-US', {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric'
-      }),
-      todos: []
-    }
-  ]);
+  const [todoGroups, setTodoGroups] = useState<TodoGroup[]>([]);
 
-  const addNewGroup = () => {
-    const newGroup = {
-      id: Date.now(),
-      title: new Date().toLocaleDateString('en-US', {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric'
-      }),
-      todos: []
-    };
-    setTodoGroups([newGroup, ...todoGroups]);
+  // Подписка на обновления из Firestore
+  useEffect(() => {
+    const q = query(
+      collection(db, 'todoGroups'),
+      orderBy('timestamp', 'desc')
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const groups = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as TodoGroup[];
+      setTodoGroups(groups);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const addNewGroup = async () => {
+    try {
+      await addDoc(collection(db, 'todoGroups'), {
+        title: new Date().toLocaleDateString('en-US', {
+          weekday: 'long',
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric'
+        }),
+        timestamp: Timestamp.now(),
+        todos: []
+      });
+    } catch (error) {
+      console.error('Error adding group:', error);
+    }
   };
 
-  const addTodo = (groupId: number, text: string) => {
+  const addTodo = async (groupId: string, text: string) => {
     if (text.trim()) {
       const newTodo = {
-        id: Date.now(),
+        id: Date.now().toString(),
         text: text.trim(),
         completed: false,
         notes: []
       };
 
-      setTodoGroups(todoGroups.map(group =>
-        group.id === groupId
-          ? { ...group, todos: [newTodo, ...group.todos] }
-          : group
-      ));
+      try {
+        const groupRef = doc(db, 'todoGroups', groupId);
+        await updateDoc(groupRef, {
+          todos: arrayUnion(newTodo)
+        });
+      } catch (error) {
+        console.error('Error adding todo:', error);
+      }
     }
   };
 
-  const toggleTodo = (groupId: number, todoId: number) => {
-    setTodoGroups(todoGroups.map(group =>
-      group.id === groupId
-        ? {
-            ...group,
-            todos: group.todos.map(todo =>
-              todo.id === todoId
-                ? { ...todo, completed: !todo.completed }
-                : todo
-            )
-          }
-        : group
-    ));
+  const toggleTodo = async (groupId: string, todoId: string) => {
+    try {
+      const group = todoGroups.find(g => g.id === groupId);
+      if (!group) return;
+
+      const updatedTodos = group.todos.map(todo =>
+        todo.id === todoId ? { ...todo, completed: !todo.completed } : todo
+      );
+
+      const groupRef = doc(db, 'todoGroups', groupId);
+      await updateDoc(groupRef, { todos: updatedTodos });
+    } catch (error) {
+      console.error('Error toggling todo:', error);
+    }
   };
 
-  const addNote = (groupId: number, todoId: number, noteText: string) => {
+  const addNote = async (groupId: string, todoId: string, noteText: string) => {
     if (noteText.trim()) {
-      setTodoGroups(todoGroups.map(group =>
-        group.id === groupId
-          ? {
-              ...group,
-              todos: group.todos.map(todo =>
-                todo.id === todoId
-                  ? {
-                      ...todo,
-                      notes: [...todo.notes, {
-                        id: Date.now(),
-                        text: noteText.trim(),
-                        timestamp: new Date().toISOString()
-                      }]
-                    }
-                  : todo
-              )
-            }
-          : group
-      ));
+      try {
+        const group = todoGroups.find(g => g.id === groupId);
+        if (!group) return;
+
+        const newNote = {
+          id: Date.now().toString(),
+          text: noteText.trim(),
+          timestamp: Timestamp.now()
+        };
+
+        const updatedTodos = group.todos.map(todo =>
+          todo.id === todoId
+            ? { ...todo, notes: [...todo.notes, newNote] }
+            : todo
+        );
+
+        const groupRef = doc(db, 'todoGroups', groupId);
+        await updateDoc(groupRef, { todos: updatedTodos });
+      } catch (error) {
+        console.error('Error adding note:', error);
+      }
     }
   };
 
-  const deleteTodo = (groupId: number, todoId: number) => {
-    setTodoGroups(todoGroups.map(group =>
-      group.id === groupId
-        ? { ...group, todos: group.todos.filter(todo => todo.id !== todoId) }
-        : group
-    ));
+  const deleteTodo = async (groupId: string, todoId: string) => {
+    try {
+      const group = todoGroups.find(g => g.id === groupId);
+      if (!group) return;
+
+      const updatedTodos = group.todos.filter(todo => todo.id !== todoId);
+      const groupRef = doc(db, 'todoGroups', groupId);
+      await updateDoc(groupRef, { todos: updatedTodos });
+    } catch (error) {
+      console.error('Error deleting todo:', error);
+    }
   };
 
-  const deleteNote = (groupId: number, todoId: number, noteId: number) => {
-    setTodoGroups(todoGroups.map(group =>
-      group.id === groupId
-        ? {
-            ...group,
-            todos: group.todos.map(todo =>
-              todo.id === todoId
-                ? {
-                    ...todo,
-                    notes: todo.notes.filter(note => note.id !== noteId)
-                  }
-                : todo
-            )
-          }
-        : group
-    ));
+  const deleteNote = async (groupId: string, todoId: string, noteId: string) => {
+    try {
+      const group = todoGroups.find(g => g.id === groupId);
+      if (!group) return;
+
+      const updatedTodos = group.todos.map(todo =>
+        todo.id === todoId
+          ? { ...todo, notes: todo.notes.filter(note => note.id !== noteId) }
+          : todo
+      );
+
+      const groupRef = doc(db, 'todoGroups', groupId);
+      await updateDoc(groupRef, { todos: updatedTodos });
+    } catch (error) {
+      console.error('Error deleting note:', error);
+    }
   };
 
   return (
@@ -216,7 +252,7 @@ const TodoTracker: React.FC = () => {
                           <div className="flex-1 min-w-0">
                             <div className="break-words">{note.text}</div>
                             <span className="text-xs opacity-75 block sm:inline sm:ml-2">
-                              {new Date(note.timestamp).toLocaleTimeString()}
+                              {new Date(note.timestamp.toDate()).toLocaleTimeString()}
                             </span>
                           </div>
                           <button

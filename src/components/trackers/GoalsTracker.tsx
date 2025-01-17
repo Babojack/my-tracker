@@ -1,115 +1,49 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Plus, X } from 'lucide-react';
 import Note from '../shared/Note';
 import Milestone from '../shared/Milestone';
-
-interface Priority {
-  importance: number;
-  urgency: number;
-  effort: number;
-  impact: number;
-}
-
-interface Goal {
-  id: number;
-  name: string;
-  deadline: string;
-  status: string;
-  image: string | null;
-  priority: Priority;
-  milestones: {
-    id: number;
-    name: string;
-    completed: boolean;
-  }[];
-  notes: {
-    id: number;
-    text: string;
-    timestamp: string;
-  }[];
-  order: number;
-}
-
-interface PriorityCriterion {
-  id: keyof Priority;
-  name: string;
-  weight: number;
-}
-
-interface SortOption {
-  value: string;
-  label: string;
-}
-
-const priorityCriteria: PriorityCriterion[] = [
-  { id: 'importance', name: 'Importance', weight: 0.4 },
-  { id: 'urgency', name: 'Urgency', weight: 0.3 },
-  { id: 'effort', name: 'Complexity', weight: 0.2 },
-  { id: 'impact', name: 'Impact', weight: 0.1 }
-];
-
-const sortOptions: SortOption[] = [
-  { value: 'default', label: 'default' },
-  { value: 'priority-high', label: 'priority-high' },
-  { value: 'priority-low', label: 'priority-low' },
-  { value: 'deadline', label: 'deadline' },
-  { value: 'name', label: 'name' }
-];
-
-interface PriorityRatingProps {
-  priority: Priority;
-  onChange: (criteriaId: keyof Priority, value: number) => void;
-}
-
-const PriorityRating: React.FC<PriorityRatingProps> = ({ priority, onChange }) => (
-  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-    {priorityCriteria.map(criterion => (
-      <div key={criterion.id} className="bg-gray-800/50 p-3 rounded">
-        <div className="flex justify-between items-center mb-2">
-          <span className="text-xs sm:text-sm">{criterion.name}</span>
-          <span className="text-xs text-gray-400">{criterion.weight * 100}%</span>
-        </div>
-        <div className="flex items-center space-x-2">
-          <span className="text-xs">1</span>
-          <input
-            type="range"
-            min="1"
-            max="10"
-            value={priority[criterion.id]}
-            onChange={(e) => onChange(criterion.id, parseInt(e.target.value))}
-            className="flex-1 h-1 sm:h-2"
-          />
-          <span className="text-xs">10</span>
-        </div>
-        <div className="text-center text-xs text-gray-400 mt-1">
-          {priority[criterion.id]}
-        </div>
-      </div>
-    ))}
-  </div>
-);
+import { PriorityRating, priorityCriteria, sortOptions } from './PriorityRating';
+import { db, storage } from '../../firebase';
+import {
+  collection,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  doc,
+  query,
+  orderBy,
+  onSnapshot,
+  Timestamp
+} from 'firebase/firestore';
+import {
+  ref,
+  uploadBytes,
+  getDownloadURL,
+  deleteObject
+} from 'firebase/storage';
+import { Goal, Priority } from './types';
 
 const GoalsTracker: React.FC = () => {
   const [sortBy, setSortBy] = useState<string>('default');
-  const [goals, setGoals] = useState<Goal[]>([{
-    id: 1,
-    name: 'Goal 1',
-    deadline: new Date().toISOString().split('T')[0],
-    status: 'Not Started',
-    image: null,
-    priority: {
-      importance: 5,
-      urgency: 5,
-      effort: 5,
-      impact: 5
-    },
-    milestones: [
-      { id: 1, name: 'Research', completed: false },
-      { id: 2, name: 'Implementation', completed: false }
-    ],
-    notes: [],
-    order: 0
-  }]);
+  const [goals, setGoals] = useState<Goal[]>([]);
+
+  // Подписка на обновления из Firestore
+  useEffect(() => {
+    const q = query(
+      collection(db, 'goals'),
+      orderBy('timestamp', 'desc')
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const goalsData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as Goal[];
+      setGoals(goalsData);
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   const calculatePriority = (priority: Priority): number => {
     return priorityCriteria.reduce((sum, criterion) =>
@@ -117,33 +51,46 @@ const GoalsTracker: React.FC = () => {
     );
   };
 
-  const handleImageUpload = (goalId: number, event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (goalId: string, event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setGoals(prevGoals =>
-          prevGoals.map(g => g.id === goalId ? {...g, image: reader.result as string} : g)
-        );
-      };
-      reader.readAsDataURL(file);
+    if (!file) return;
+
+    try {
+      // Создаем reference для изображения в Storage
+      const imageRef = ref(storage, `goal-images/${goalId}/${file.name}`);
+
+      // Загружаем файл
+      await uploadBytes(imageRef, file);
+
+      // Получаем URL загруженного файла
+      const downloadUrl = await getDownloadURL(imageRef);
+
+      // Обновляем документ в Firestore
+      const goalRef = doc(db, 'goals', goalId);
+      await updateDoc(goalRef, {
+        imageUrl: downloadUrl
+      });
+    } catch (error) {
+      console.error('Error uploading image:', error);
     }
   };
 
-  const addNote = (goalId: number, note: string) => {
-    if (note.trim()) {
-      setGoals(prevGoals =>
-        prevGoals.map(g =>
-          g.id === goalId ? {
-            ...g,
-            notes: [{
-              id: Date.now(),
-              text: note.trim(),
-              timestamp: new Date().toISOString()
-            }, ...g.notes]
-          } : g
-        )
-      );
+  const addNote = async (goalId: string, noteText: string) => {
+    if (!noteText.trim()) return;
+
+    try {
+      const goalRef = doc(db, 'goals', goalId);
+      const newNote = {
+        id: Date.now().toString(),
+        text: noteText.trim(),
+        timestamp: Timestamp.now()
+      };
+
+      await updateDoc(goalRef, {
+        notes: [...goals.find(g => g.id === goalId)?.notes || [], newNote]
+      });
+    } catch (error) {
+      console.error('Error adding note:', error);
     }
   };
 
@@ -153,34 +100,159 @@ const GoalsTracker: React.FC = () => {
     return allCompleted ? 'Completed' : (hasStarted ? 'In Progress' : 'Not Started');
   };
 
-  const updatePriority = (goalId: number, criteriaId: keyof Priority, value: number) => {
-    setGoals(prevGoals =>
-      prevGoals.map(g =>
-        g.id === goalId
-          ? { ...g, priority: { ...g.priority, [criteriaId]: value } }
-          : g
-      )
-    );
+  const updatePriority = async (goalId: string, criteriaId: keyof Priority, value: number) => {
+    try {
+      const goalRef = doc(db, 'goals', goalId);
+      const goal = goals.find(g => g.id === goalId);
+      if (!goal) return;
+
+      await updateDoc(goalRef, {
+        priority: { ...goal.priority, [criteriaId]: value }
+      });
+    } catch (error) {
+      console.error('Error updating priority:', error);
+    }
   };
 
-  const addNewGoal = () => {
-    const maxOrder = Math.max(...goals.map(g => g.order), -1);
-    setGoals(prevGoals => [...prevGoals, {
-      id: Date.now(),
-      name: 'New Goal',
-      deadline: new Date().toISOString().split('T')[0],
-      status: 'Not Started',
-      image: null,
-      priority: {
-        importance: 5,
-        urgency: 5,
-        effort: 5,
-        impact: 5
-      },
-      milestones: [],
-      notes: [],
-      order: maxOrder + 1
-    }]);
+  const addNewGoal = async () => {
+    try {
+      const maxOrder = Math.max(...goals.map(g => g.order), -1);
+      await addDoc(collection(db, 'goals'), {
+        name: 'New Goal',
+        deadline: new Date().toISOString().split('T')[0],
+        status: 'Not Started',
+        imageUrl: null,
+        priority: {
+          importance: 5,
+          urgency: 5,
+          effort: 5,
+          impact: 5
+        },
+        milestones: [],
+        notes: [],
+        order: maxOrder + 1,
+        timestamp: Timestamp.now()
+      });
+    } catch (error) {
+      console.error('Error adding goal:', error);
+    }
+  };
+
+  const updateGoalName = async (goalId: string, newName: string) => {
+    try {
+      const goalRef = doc(db, 'goals', goalId);
+      await updateDoc(goalRef, { name: newName });
+    } catch (error) {
+      console.error('Error updating goal name:', error);
+    }
+  };
+
+  const updateGoalDeadline = async (goalId: string, newDeadline: string) => {
+    try {
+      const goalRef = doc(db, 'goals', goalId);
+      await updateDoc(goalRef, { deadline: newDeadline });
+    } catch (error) {
+      console.error('Error updating deadline:', error);
+    }
+  };
+
+  const deleteGoal = async (goalId: string) => {
+    try {
+      // Удаляем изображение из Storage, если оно есть
+      const goal = goals.find(g => g.id === goalId);
+      if (goal?.imageUrl) {
+        const imageRef = ref(storage, goal.imageUrl);
+        await deleteObject(imageRef);
+      }
+
+      // Удаляем документ из Firestore
+      await deleteDoc(doc(db, 'goals', goalId));
+    } catch (error) {
+      console.error('Error deleting goal:', error);
+    }
+  };
+
+  const addMilestone = async (goalId: string) => {
+    try {
+      const goalRef = doc(db, 'goals', goalId);
+      const goal = goals.find(g => g.id === goalId);
+      if (!goal) return;
+
+      const newMilestone = {
+        id: Date.now().toString(),
+        name: 'New Milestone',
+        completed: false
+      };
+
+      await updateDoc(goalRef, {
+        milestones: [...goal.milestones, newMilestone]
+      });
+    } catch (error) {
+      console.error('Error adding milestone:', error);
+    }
+  };
+
+  const updateMilestone = async (goalId: string, milestoneId: string, name: string) => {
+    try {
+      const goalRef = doc(db, 'goals', goalId);
+      const goal = goals.find(g => g.id === goalId);
+      if (!goal) return;
+
+      const updatedMilestones = goal.milestones.map(m =>
+        m.id === milestoneId ? { ...m, name } : m
+      );
+
+      await updateDoc(goalRef, { milestones: updatedMilestones });
+    } catch (error) {
+      console.error('Error updating milestone:', error);
+    }
+  };
+
+  const toggleMilestone = async (goalId: string, milestoneId: string) => {
+    try {
+      const goalRef = doc(db, 'goals', goalId);
+      const goal = goals.find(g => g.id === goalId);
+      if (!goal) return;
+
+      const updatedMilestones = goal.milestones.map(m =>
+        m.id === milestoneId ? { ...m, completed: !m.completed } : m
+      );
+
+      await updateDoc(goalRef, {
+        milestones: updatedMilestones,
+        status: updateGoalStatus({ ...goal, milestones: updatedMilestones })
+      });
+    } catch (error) {
+      console.error('Error toggling milestone:', error);
+    }
+  };
+
+  const deleteMilestone = async (goalId: string, milestoneId: string) => {
+    try {
+      const goalRef = doc(db, 'goals', goalId);
+      const goal = goals.find(g => g.id === goalId);
+      if (!goal) return;
+
+      await updateDoc(goalRef, {
+        milestones: goal.milestones.filter(m => m.id !== milestoneId)
+      });
+    } catch (error) {
+      console.error('Error deleting milestone:', error);
+    }
+  };
+
+  const deleteNote = async (goalId: string, noteId: string) => {
+    try {
+      const goalRef = doc(db, 'goals', goalId);
+      const goal = goals.find(g => g.id === goalId);
+      if (!goal) return;
+
+      await updateDoc(goalRef, {
+        notes: goal.notes.filter(n => n.id !== noteId)
+      });
+    } catch (error) {
+      console.error('Error deleting note:', error);
+    }
   };
 
   const getDisplayedGoals = () => {
@@ -249,9 +321,9 @@ const GoalsTracker: React.FC = () => {
                 htmlFor={`goal-${goal.id}`}
                 className="cursor-pointer block"
               >
-                {goal.image ? (
+                {goal.imageUrl ? (
                   <img
-                    src={goal.image}
+                    src={goal.imageUrl}
                     alt="Goal"
                     className="w-full h-24 sm:h-32 object-cover rounded"
                   />
@@ -267,22 +339,14 @@ const GoalsTracker: React.FC = () => {
               <input
                 type="text"
                 value={goal.name}
-                onChange={(e) => setGoals(prevGoals =>
-                  prevGoals.map(g =>
-                    g.id === goal.id ? {...g, name: e.target.value} : g
-                  )
-                )}
+                onChange={(e) => updateGoalName(goal.id, e.target.value)}
                 className="bg-transparent font-semibold outline-none text-sm sm:text-base w-full sm:w-auto"
               />
               <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
                 <input
                   type="date"
                   value={goal.deadline}
-                  onChange={(e) => setGoals(prevGoals =>
-                    prevGoals.map(g =>
-                      g.id === goal.id ? {...g, deadline: e.target.value} : g
-                    )
-                  )}
+                  onChange={(e) => updateGoalDeadline(goal.id, e.target.value)}
                   className="bg-gray-800 p-2 rounded text-sm flex-1 sm:flex-none"
                 />
                 <span className="text-xs sm:text-sm px-2 py-1 rounded bg-gray-800">{goal.status}</span>
@@ -290,7 +354,7 @@ const GoalsTracker: React.FC = () => {
                   Priority: {calculatePriority(goal.priority).toFixed(2)}
                 </span>
                 <button
-                  onClick={() => setGoals(prevGoals => prevGoals.filter(g => g.id !== goal.id))}
+                  onClick={() => deleteGoal(goal.id)}
                   className="p-1 hover:bg-gray-600 rounded ml-auto sm:ml-0"
                 >
                   <X className="w-4 h-4" />
@@ -307,18 +371,7 @@ const GoalsTracker: React.FC = () => {
               <div className="flex justify-between items-center">
                 <h3 className="text-sm font-semibold">Milestones</h3>
                 <button
-                  onClick={() => setGoals(prevGoals =>
-                    prevGoals.map(g =>
-                      g.id === goal.id ? {
-                        ...g,
-                        milestones: [...g.milestones, {
-                          id: Date.now(),
-                          name: 'New Milestone',
-                          completed: false
-                        }]
-                      } : g
-                    )
-                  )}
+                  onClick={() => addMilestone(goal.id)}
                   className="p-1 hover:bg-gray-600 rounded"
                 >
                   <Plus className="w-4 h-4" />
@@ -329,32 +382,9 @@ const GoalsTracker: React.FC = () => {
                   <Milestone
                     key={milestone.id}
                     milestone={milestone}
-                    onToggle={() => {
-                      const updatedGoal = {
-                        ...goal,
-                        milestones: goal.milestones.map(m =>
-                          m.id === milestone.id ? {...m, completed: !m.completed} : m
-                        )
-                      };
-                      updatedGoal.status = updateGoalStatus(updatedGoal);
-                      setGoals(prevGoals => prevGoals.map(g =>
-                        g.id === goal.id ? updatedGoal : g
-                      ));
-                    }}
-                    onUpdate={(name) => setGoals(prevGoals => prevGoals.map(g => ({
-                      ...g,
-                      milestones: g.id === goal.id
-                        ? g.milestones.map(m =>
-                            m.id === milestone.id ? {...m, name} : m
-                          )
-                        : g.milestones
-                    })))}
-                    onDelete={() => setGoals(prevGoals => prevGoals.map(g => ({
-                      ...g,
-                      milestones: g.id === goal.id
-                        ? g.milestones.filter(m => m.id !== milestone.id)
-                        : g.milestones
-                    })))}
+                    onToggle={() => toggleMilestone(goal.id, milestone.id)}
+                    onUpdate={(name) => updateMilestone(goal.id, milestone.id, name)}
+                    onDelete={() => deleteMilestone(goal.id, milestone.id)}
                   />
                 ))}
               </div>
@@ -372,17 +402,15 @@ const GoalsTracker: React.FC = () => {
                   }
                 }}
               />
-            <div className="space-y-2 mt-2">
+              <div className="space-y-2 mt-2">
                 {goal.notes.map(note => (
                   <Note
                     key={note.id}
-                    note={note}
-                    onDelete={() => setGoals(prevGoals => prevGoals.map(g => ({
-                      ...g,
-                      notes: g.id === goal.id
-                        ? g.notes.filter(n => n.id !== note.id)
-                        : g.notes
-                    })))}
+                    note={{
+                      ...note,
+                      timestamp: note.timestamp.toDate().toISOString()
+                    }}
+                    onDelete={() => deleteNote(goal.id, note.id)}
                   />
                 ))}
               </div>

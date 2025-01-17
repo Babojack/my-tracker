@@ -1,20 +1,32 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
 import Note from '../shared/Note';
+import { db } from '../../firebase';
+import {
+  collection,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  doc,
+  query,
+  orderBy,
+  onSnapshot,
+  Timestamp
+} from 'firebase/firestore';
 
 interface MoodEntry {
-  id: number;
+  id: string;
   mood: {
     id: number;
     label: string;
     color: string;
     emoji: string;
   };
-  timestamp: string;
+  timestamp: Timestamp;
   notes: {
-    id: number;
+    id: string;
     text: string;
-    timestamp: string;
+    timestamp: Timestamp;
   }[];
 }
 
@@ -30,30 +42,77 @@ const MoodTracker: React.FC = () => {
     { id: 1, label: 'Bad', color: 'bg-red-500', emoji: '😞' }
   ];
 
-  const addEntry = (mood: typeof moodLevels[0]) => {
-    setEntries([
-      {
-        id: Date.now(),
+  // Подписка на обновления из Firestore
+  useEffect(() => {
+    const q = query(
+      collection(db, 'moodEntries'),
+      orderBy('timestamp', 'desc')
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const entriesData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as MoodEntry[];
+      setEntries(entriesData);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const addEntry = async (mood: typeof moodLevels[0]) => {
+    try {
+      await addDoc(collection(db, 'moodEntries'), {
         mood,
-        timestamp: new Date().toISOString(),
+        timestamp: Timestamp.now(),
         notes: []
-      },
-      ...entries
-    ]);
+      });
+    } catch (error) {
+      console.error('Error adding entry:', error);
+    }
   };
 
-  const addNote = (entryId: number, noteText: string) => {
+  const addNote = async (entryId: string, noteText: string) => {
     if (noteText.trim()) {
-      setEntries(entries.map(entry =>
-        entry.id === entryId ? {
-          ...entry,
-          notes: [...(entry.notes || []), {
-            id: Date.now(),
-            text: noteText.trim(),
-            timestamp: new Date().toISOString()
-          }]
-        } : entry
-      ));
+      try {
+        const entry = entries.find(e => e.id === entryId);
+        if (!entry) return;
+
+        const newNote = {
+          id: Date.now().toString(),
+          text: noteText.trim(),
+          timestamp: Timestamp.now()
+        };
+
+        const entryRef = doc(db, 'moodEntries', entryId);
+        await updateDoc(entryRef, {
+          notes: [...entry.notes, newNote]
+        });
+      } catch (error) {
+        console.error('Error adding note:', error);
+      }
+    }
+  };
+
+  const deleteEntry = async (entryId: string) => {
+    try {
+      await deleteDoc(doc(db, 'moodEntries', entryId));
+    } catch (error) {
+      console.error('Error deleting entry:', error);
+    }
+  };
+
+  const deleteNote = async (entryId: string, noteId: string) => {
+    try {
+      const entry = entries.find(e => e.id === entryId);
+      if (!entry) return;
+
+      const updatedNotes = entry.notes.filter(note => note.id !== noteId);
+
+      const entryRef = doc(db, 'moodEntries', entryId);
+      await updateDoc(entryRef, { notes: updatedNotes });
+    } catch (error) {
+      console.error('Error deleting note:', error);
     }
   };
 
@@ -112,10 +171,10 @@ const MoodTracker: React.FC = () => {
               </div>
               <div className="flex items-center justify-between sm:justify-end w-full sm:w-auto gap-2">
                 <span className="text-xs sm:text-sm text-gray-300">
-                  {new Date(entry.timestamp).toLocaleString()}
+                  {entry.timestamp.toDate().toLocaleString()}
                 </span>
                 <button
-                  onClick={() => setEntries(entries.filter(e => e.id !== entry.id))}
+                  onClick={() => deleteEntry(entry.id)}
                   className="p-1 hover:bg-gray-600 rounded transition-colors"
                 >
                   <X className="w-4 h-4" />
@@ -143,13 +202,11 @@ const MoodTracker: React.FC = () => {
               {entry.notes && entry.notes.map(note => (
                 <Note
                   key={note.id}
-                  note={note}
-                  onDelete={() => setEntries(entries.map(e => ({
-                    ...e,
-                    notes: e.id === entry.id
-                      ? e.notes.filter(n => n.id !== note.id)
-                      : e.notes
-                  })))}
+                  note={{
+                    ...note,
+                    timestamp: note.timestamp.toDate().toISOString()
+                  }}
+                  onDelete={() => deleteNote(entry.id, note.id)}
                 />
               ))}
             </div>
